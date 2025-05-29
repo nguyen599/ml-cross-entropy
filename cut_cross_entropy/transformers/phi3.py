@@ -7,7 +7,6 @@ import transformers
 from transformers.cache_utils import Cache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.phi3.modeling_phi3 import (
-    PHI3_INPUTS_DOCSTRING,
     KwargsForCausalLM,
     Unpack,
 )

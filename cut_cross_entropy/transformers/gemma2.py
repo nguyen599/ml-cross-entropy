@@ -7,7 +7,6 @@ import transformers
 from transformers.cache_utils import HybridCache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.gemma2.modeling_gemma2 import (
-    GEMMA2_INPUTS_DOCSTRING,
     logger,
 )
 

@@ -8,7 +8,6 @@ import transformers
 from transformers.cache_utils import Cache
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.models.mistral.modeling_mistral import (
-    MISTRAL_INPUTS_DOCSTRING,
     KwargsForCausalLM,
     Unpack,
 )
