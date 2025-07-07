@@ -9,7 +9,11 @@ from cut_cross_entropy.linear_cross_entropy import LCE_IMPL_DEFAULT
 from .cohere import patch_cohere, patch_cohere2
 from .gemma import patch_gemma
 from .gemma3 import patch_gemma2, patch_gemma3, patch_gemma3_text
-from .gemma3n import patch_gemma3n, patch_gemma3n_text
+try:
+    from .gemma3n import patch_gemma3n, patch_gemma3n_text
+except ImportError:
+    patch_gemma3n = None
+    patch_gemma3n_text = None
 from .glm4 import patch_glm, patch_glm4
 from .llama import patch_llama
 from .llama4 import patch_llama4, patch_llama4_text
