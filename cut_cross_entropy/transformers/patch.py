@@ -22,6 +22,7 @@ from .mistral import patch_mistral
 from .mistral3 import patch_mistral3
 from .voxtral import patch_voxtral
 from .mllama import patch_mllama
+from .smollm3 import patch_smollm3
 from .phi import patch_phi
 from .phi3 import patch_phi3
 from .phi4_multimodal import patch_phi4_multimodal
@@ -31,6 +32,8 @@ from .qwen2_moe import patch_qwen2_moe
 from .qwen2_vl import patch_qwen2_vl
 from .qwen3 import patch_qwen3
 from .qwen3_moe import patch_qwen3_moe
+from .granite import patch_granite
+from .granitemoe import patch_granitemoe
 
 from .utils import PatchOptions, TransformersModelT
 
@@ -53,6 +56,7 @@ PATCH_FNS = {
     "mistral": patch_mistral,
     "mistral3": patch_mistral3,
     "voxtral": patch_voxtral,
+    "smollm3": patch_smollm3,
     "qwen2": patch_qwen2,
     "qwen2_moe": patch_qwen2_moe,
     "qwen2_vl": patch_qwen2_vl,
@@ -63,6 +67,8 @@ PATCH_FNS = {
     "cohere2": patch_cohere2,
     "glm": patch_glm,
     "glm4": patch_glm4,
+    "granite": patch_granite,
+    "granitemoe": patch_granitemoe,
 }
 
 
