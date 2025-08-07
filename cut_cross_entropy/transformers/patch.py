@@ -42,12 +42,18 @@ except ImportError:
     patch_hunyuan_v1_dense = None  # type: ignore
     patch_hunyuan_v1_moe = None  # type: ignore
 
+try:
+    from .arcee import patch_arcee
+except ImportError:
+    patch_arcee = None
+
 from .mixtral import patch_mixtral
 
 try:
     from .gpt_oss import patch_gpt_oss
 except ImportError:
     patch_gpt_oss = None  # type: ignore
+
 
 from .utils import PatchOptions, TransformersModelT
 
@@ -86,6 +92,7 @@ PATCH_FNS = {
     "granitemoe": patch_granitemoe,
     "hunyuan_v1_dense": patch_hunyuan_v1_dense,
     "hunyuan_v1_moe": patch_hunyuan_v1_moe,
+    "arcee": patch_arcee,
     "gpt_oss": patch_gpt_oss,
 }
 
