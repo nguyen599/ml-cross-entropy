@@ -51,6 +51,12 @@ except ImportError:
     patch_hunyuan_v1_dense = None
     patch_hunyuan_v1_moe = None
 
+try:
+    from .glm4v import patch_glm4v, patch_glm4v_moe
+except ImportError:
+    patch_glm4v = None
+    patch_glm4v_moe = None
+
 AXOLOTL_CCE_FORK = 1
 
 PATCH_FNS = {
@@ -68,6 +74,8 @@ PATCH_FNS = {
     "glm": patch_glm,
     "glm4": patch_glm4,
     "glm4_moe": patch_glm4_moe,
+    "glm4v": patch_glm4v,
+    "glm4v_moe": patch_glm4v_moe,
     "gpt_oss": patch_gpt_oss,
     "granite": patch_granite,
     "granitemoe": patch_granitemoe,
