@@ -1,4 +1,4 @@
-"""Llama CCE patch. Adapted from transformers v4.56.2"""
+"""Qwen3 VL CCE patch. Adapted from transformers Qwen3VL PR"""
 
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 
@@ -22,9 +22,8 @@ from typing import Optional, Union
 import torch
 import transformers
 from transformers.cache_utils import Cache
-from transformers.modeling_outputs import (
-    BaseModelOutputWithPast,
-    CausalLMOutputWithPast,
+from transformers.models.qwen3_vl.modeling_qwen3_vl import (
+    Qwen3VLCausalLMOutputWithPast,
 )
 
 from cut_cross_entropy.transformers.utils import (
@@ -36,38 +35,45 @@ from cut_cross_entropy.transformers.utils import (
 _PATCH_OPTS: PatchOptions | None = None
 
 
-def cce_forward(
+def cce_forward_multimodal(
     self,
-    input_ids: Optional[torch.LongTensor] = None,
+    input_ids: torch.LongTensor = None,
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
     past_key_values: Optional[Cache] = None,
     inputs_embeds: Optional[torch.FloatTensor] = None,
     labels: Optional[torch.LongTensor] = None,
-    use_cache: Optional[bool] = None,
+    pixel_values: Optional[torch.Tensor] = None,
+    pixel_values_videos: Optional[torch.FloatTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
     cache_position: Optional[torch.LongTensor] = None,
     logits_to_keep: Union[int, torch.Tensor] = 0,
     **kwargs,
-) -> CausalLMOutputWithPast:
-    outputs: BaseModelOutputWithPast = self.model(
+) -> Union[tuple, Qwen3VLCausalLMOutputWithPast]:
+    outputs = self.model(
         input_ids=input_ids,
-        attention_mask=attention_mask,
+        pixel_values=pixel_values,
+        pixel_values_videos=pixel_values_videos,
+        image_grid_thw=image_grid_thw,
+        video_grid_thw=video_grid_thw,
         position_ids=position_ids,
+        attention_mask=attention_mask,
         past_key_values=past_key_values,
         inputs_embeds=inputs_embeds,
-        use_cache=use_cache,
         cache_position=cache_position,
         **kwargs,
     )
 
-    hidden_states = outputs.last_hidden_state
-    loss = None
+    hidden_states = outputs[0]
     logits = None
+    loss = None
 
     # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
     slice_indices = (
         slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
     )
+
     if _PATCH_OPTS is not None and _PATCH_OPTS.use_lce(labels, self.training):
         assert labels is not None
         loss = apply_lce(
@@ -84,35 +90,59 @@ def cce_forward(
             loss = self.loss_function(
                 logits=logits,
                 labels=labels,
-                vocab_size=self.config.vocab_size,
+                vocab_size=self.config.text_config.vocab_size,
                 **kwargs,
             )
 
-    return CausalLMOutputWithPast(
+    return Qwen3VLCausalLMOutputWithPast(
         loss=loss,
         logits=logits,
         past_key_values=outputs.past_key_values,
         hidden_states=outputs.hidden_states,
         attentions=outputs.attentions,
+        rope_deltas=outputs.rope_deltas,
     )
 
 
-def patch_llama(
+def patch_qwen3_vl(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
 ) -> TransformersModelT | None:
-    """Patch Llama for CCE."""
-    global _PATCH_OPTS
-    from transformers.models.llama import modeling_llama
+    global _PATCH_OPTS  # pylint: disable=global-statement
+
+    from transformers.models.qwen3_vl import modeling_qwen3_vl
 
     _PATCH_OPTS = patch_options
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_llama.LlamaForCausalLM), (
-            f"Expected a LlamaForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_qwen3_vl.Qwen3VLForConditionalGeneration), (
+            f"Expected a Qwen3VLForConditionalGeneration model. Got {type(maybe_model)}."
         )
-        maybe_model.forward = MethodType(cce_forward, maybe_model)
+        maybe_model.forward = MethodType(cce_forward_multimodal, maybe_model)
+
         return maybe_model
 
-    modeling_llama.LlamaForCausalLM.forward = cce_forward
+    modeling_qwen3_vl.Qwen3VLForConditionalGeneration.forward = cce_forward_multimodal
+    return None
+
+
+def patch_qwen3_vl_moe(
+    maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
+    patch_options: PatchOptions,
+) -> TransformersModelT | None:
+    global _PATCH_OPTS  # pylint: disable=global-statement
+
+    from transformers.models.qwen3_vl import modeling_qwen3_vl
+
+    _PATCH_OPTS = patch_options
+
+    if isinstance(maybe_model, transformers.PreTrainedModel):
+        assert isinstance(maybe_model, modeling_qwen3_vl.Qwen3VLMoeForConditionalGeneration), (
+            f"Expected a Qwen3VLMoeForConditionalGeneration model. Got {type(maybe_model)}."
+        )
+        maybe_model.forward = MethodType(cce_forward_multimodal, maybe_model)
+
+        return maybe_model
+
+    modeling_qwen3_vl.Qwen3VLMoeForConditionalGeneration.forward = cce_forward_multimodal
     return None
