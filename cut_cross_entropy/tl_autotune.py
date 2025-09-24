@@ -313,7 +313,7 @@ def estimate_matmul_time(
             f"{BLOCK_B=}, {BLOCK_V=}, {BLOCK_D=}, {num_warps=}, {num_stages=}, "
             f"Total time: {total_time_ms}ms, compute time: {compute_ms}ms, "
             f"loading time: {load_ms}ms, store time: {store_ms}ms, "
-            f"Activate CTAs: {active_cta_ratio*100}%"
+            f"Activate CTAs: {active_cta_ratio * 100}%"
         )
     return total_time_ms
 
@@ -453,12 +453,45 @@ def get_autotune_config():
     ] + get_configs_io_bound()
 
 
-def _heuristics_from_config(config: Config) -> Callable[..., autotuner.Heuristics]:
-    return triton.heuristics({k: (lambda args, _v=v: _v) for k, v in config.all_kwargs().items()})
+def _heuristics_from_config(
+    config: Config, fp32_config: Config | None = None, arg_name: str | None = None
+) -> Callable[..., autotuner.Heuristics]:
+    if fp32_config is None:
+        return triton.heuristics(
+            {k: (lambda args, _v=v: _v) for k, v in config.all_kwargs().items()}
+        )
+    else:
+        assert arg_name is not None
+
+        kwargs = config.all_kwargs()
+        fp32_kwargs = fp32_config.all_kwargs()
+        assert kwargs.keys() == fp32_kwargs.keys()
+
+        keys_opts = list(kwargs.items())
+        fp32_opts = [fp32_kwargs[k] for k, _ in keys_opts]
+        return triton.heuristics(
+            {
+                k: (
+                    lambda args, _v=v, _fp32_v=fp32_v: _fp32_v
+                    if args[arg_name].dtype == torch.float32
+                    else _v
+                )
+                for (k, v), fp32_v in zip(keys_opts, fp32_opts, strict=True)
+            }
+        )
 
 
-def _cce_forward_best_config() -> Config:
-    return Config(dict(BLOCK_B=256, BLOCK_V=128, BLOCK_D=32), num_warps=8, num_stages=3)
+## NOTE
+# Both the forward and backward kernels use the config. This ensures that
+# both forward and backward use the same tensor core instructions to compute the logits.
+# These differing can cause the logits to differ between forward and backward, which
+# really hurts the gradient.
+def _cce_best_config() -> Config:
+    return Config(dict(BLOCK_B=128, BLOCK_V=128, BLOCK_D=32), num_warps=4, num_stages=4)
+
+
+def _cce_best_config_fp32() -> Config:
+    return Config(dict(BLOCK_B=32, BLOCK_V=128, BLOCK_D=32), num_warps=4, num_stages=3)
 
 
 def cce_forward_autotune() -> Callable[..., autotuner.Autotuner | autotuner.Heuristics]:
@@ -475,7 +508,7 @@ def cce_forward_autotune() -> Callable[..., autotuner.Autotuner | autotuner.Heur
             reset_to_zero=["LA"],
         )
     else:
-        return _heuristics_from_config(_cce_forward_best_config())
+        return _heuristics_from_config(_cce_best_config(), _cce_best_config_fp32(), "E")
 
 
 def _bw_total_ops_fn(B, V, D) -> float:
@@ -484,10 +517,6 @@ def _bw_total_ops_fn(B, V, D) -> float:
 
 def _bw_total_store_fn(B, V, D, dtsize, num_cta_b, num_cta_v):
     return 0.2 * (num_cta_v * B * D * dtsize + num_cta_b * D * V * dtsize)
-
-
-def _cce_backward_best_config() -> Config:
-    return Config(dict(BLOCK_B=128, BLOCK_V=128, BLOCK_D=32), num_warps=4, num_stages=4)
 
 
 def cce_backward_autotune() -> Callable[..., autotuner.Autotuner | autotuner.Heuristics]:
@@ -509,7 +538,7 @@ def cce_backward_autotune() -> Callable[..., autotuner.Autotuner | autotuner.Heu
             reset_to_zero=["dE", "dC", "dEC", "dCC", "dBias"],
         )
     else:
-        return _heuristics_from_config(_cce_backward_best_config())
+        return _heuristics_from_config(_cce_best_config(), _cce_best_config_fp32(), "E")
 
 
 def _indexed_dot_best_config() -> Config:

@@ -44,13 +44,13 @@ def _loss(
 @skip_no_cuda
 @pytest.mark.parametrize("impl", ["cce", "torch_compile"])
 @pytest.mark.parametrize(
-    "dtype,error_tol", [(torch.float32, 1e-5), (torch.float16, 1e-3), (torch.bfloat16, 1e-2)]
+    "dtype,error_tol", [(torch.float32, 1e-5), (torch.float16, 1.5e-3), (torch.bfloat16, 1.5e-2)]
 )
 @pytest.mark.parametrize("softcap", [None, 20.0])
 @pytest.mark.parametrize("has_bias", [True, False])
 @pytest.mark.parametrize("shift", [0, 2])
 @pytest.mark.parametrize("invalids", [False, True])
-@pytest.mark.parametrize("shape", [(256, 512, 128), (252, 507, 128), (252, 507, 123)])
+@pytest.mark.parametrize("shape", [(256, 512, 512), (252, 507, 512), (252, 507, 497)])
 def test_loss_forward(
     impl: str,
     dtype: torch.dtype,
@@ -75,7 +75,7 @@ def test_loss_forward(
     c[0 : min(N, V) // 2] = e[0 : min(N, V) // 2]
 
     if has_bias:
-        bias = torch.randn(V, device="cuda", dtype=dtype) * 0.01
+        bias = torch.randn(V, device="cuda", dtype=dtype)
     else:
         bias = None
 

@@ -1,16 +1,32 @@
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 import platform
-from typing import TYPE_CHECKING
+import warnings
+from typing import TYPE_CHECKING, Literal, overload
 
 import torch
 import torch.nn as nn
 
 from cut_cross_entropy.cce_utils import CCEPreset, CCEPresets, LinearCrossEntropyImpl
 from cut_cross_entropy.constants import IGNORE_INDEX
-from cut_cross_entropy.doc import CCE_OPTS_DOC, IMPL_DOC, LINEAR_CROSS_ENTROPY_DOC, add_doc_start
+from cut_cross_entropy.doc import (
+    CCE_OPTS_DOC,
+    DTENSOR_NOTE,
+    IMPL_DOC,
+    LINEAR_CROSS_ENTROPY_DOC,
+    add_doc_end,
+    add_doc_start,
+)
 from cut_cross_entropy.torch_compile import torch_compile_linear_cross_entropy
-from cut_cross_entropy.utils import is_torch_greater_or_equal_2_5
+from cut_cross_entropy.utils import (
+    CCEWarning,
+    is_torch_greater_or_equal_2_5,
+    is_triton_3_2,
+    maybe_type_as,
+    to_full_tensor,
+)
 from cut_cross_entropy.vocab_parallel import VocabParallelOptions
+
+warnings.filterwarnings("once", category=CCEWarning, module="cut_cross_entropy")
 
 PLATFORM_SYSTEM = platform.system()
 
@@ -27,16 +43,11 @@ if TYPE_CHECKING or is_torch_greater_or_equal_2_5():
 
 
 is_d_tensor_error_message = (
-    "Received {name} as a torch.distributed.tensor.DTensor. "
-    "This is not supported. "
-    "If possible, change the sharding strategy such that {name} is already unsharded. "
-    "If not, see https://github.com/apple/ml-cross-entropy/issues/31."
+    "Received {name} as a torch.distributed.tensor.DTensor. This is not supported. "
 )
 
 
-@add_doc_start(LINEAR_CROSS_ENTROPY_DOC)
-@add_doc_start(*(doc_str + " Only valid for the cce implementation.\n" for doc_str in CCE_OPTS_DOC))
-@add_doc_start(IMPL_DOC)
+@overload
 def linear_cross_entropy(
     e: torch.Tensor,
     c: torch.Tensor,
@@ -46,6 +57,7 @@ def linear_cross_entropy(
     softcap: float | None = None,
     reduction: str = "mean",
     shift: bool | int = 0,
+    return_lse: Literal[False] = False,
     filter_eps: float | str | None = "auto",
     accum_e_fp32: bool = False,
     accum_c_fp32: bool = False,
@@ -53,16 +65,84 @@ def linear_cross_entropy(
     filter_c_grad: bool = True,
     impl: str | LinearCrossEntropyImpl = LCE_IMPL_DEFAULT,
     vocab_parallel_options: VocabParallelOptions | None = None,
-) -> torch.Tensor:
+) -> torch.Tensor: ...
+
+
+@overload
+def linear_cross_entropy(
+    e: torch.Tensor,
+    c: torch.Tensor,
+    targets: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    ignore_index: int = IGNORE_INDEX,
+    softcap: float | None = None,
+    reduction: str = "mean",
+    shift: bool | int = 0,
+    return_lse: Literal[True] = True,
+    filter_eps: float | str | None = "auto",
+    accum_e_fp32: bool = False,
+    accum_c_fp32: bool = False,
+    filter_e_grad: bool = True,
+    filter_c_grad: bool = True,
+    impl: str | LinearCrossEntropyImpl = LCE_IMPL_DEFAULT,
+    vocab_parallel_options: VocabParallelOptions | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]: ...
+
+
+@overload
+def linear_cross_entropy(
+    e: torch.Tensor,
+    c: torch.Tensor,
+    targets: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    ignore_index: int = IGNORE_INDEX,
+    softcap: float | None = None,
+    reduction: str = "mean",
+    shift: bool | int = 0,
+    return_lse: bool = False,
+    filter_eps: float | str | None = "auto",
+    accum_e_fp32: bool = False,
+    accum_c_fp32: bool = False,
+    filter_e_grad: bool = True,
+    filter_c_grad: bool = True,
+    impl: str | LinearCrossEntropyImpl = LCE_IMPL_DEFAULT,
+    vocab_parallel_options: VocabParallelOptions | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]: ...
+
+
+@add_doc_start(LINEAR_CROSS_ENTROPY_DOC)
+@add_doc_start(*(doc_str + " Only valid for the cce implementation." for doc_str in CCE_OPTS_DOC))
+@add_doc_start(IMPL_DOC)
+@add_doc_end(DTENSOR_NOTE)
+def linear_cross_entropy(
+    e: torch.Tensor,
+    c: torch.Tensor,
+    targets: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    ignore_index: int = IGNORE_INDEX,
+    softcap: float | None = None,
+    reduction: str = "mean",
+    shift: bool | int = 0,
+    return_lse: bool = False,
+    filter_eps: float | str | None = "auto",
+    accum_e_fp32: bool = False,
+    accum_c_fp32: bool = False,
+    filter_e_grad: bool = True,
+    filter_c_grad: bool = True,
+    impl: str | LinearCrossEntropyImpl = LCE_IMPL_DEFAULT,
+    vocab_parallel_options: VocabParallelOptions | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
-    :param impl: The linear cross entropy implementation to use. Currently supports cce, torch_compile, and cce_exact.
-    """
+    :param vocab_parallel_options: Used to enable vocab parallelism."""
 
     if is_torch_greater_or_equal_2_5():
-        maybe_tensor_inputs = dict(e=e, c=c, targets=targets, bias=bias)
+        maybe_tensor_inputs = dict(e=e, targets=targets)
         for k, v in maybe_tensor_inputs.items():
             if isinstance(v, torch.distributed.tensor.DTensor):
                 raise ValueError(is_d_tensor_error_message.format(name=k))
+
+        c = maybe_type_as(to_full_tensor(c), e)
+        bias = maybe_type_as(to_full_tensor(bias), e)
 
     if isinstance(impl, LinearCrossEntropyImpl):
         impl = impl.name.lower()
@@ -86,6 +166,15 @@ def linear_cross_entropy(
                 "CCE does not support MacOS. Please use torch_compile when running on MacOS instead."
             )
 
+        if is_triton_3_2():
+            warnings.warn(
+                "There is a known issue with CCE and Triton 3.2 (the version that ships with PyTorch 2.6)"
+                " that can result in incorrect gradients. If possible, please verify that you"
+                " are not impacted by this bug by trying a newer triton version (i.e. by installing PyTorch>2.6).",
+                CCEWarning,
+                stacklevel=2,
+            )
+
         cce_opts = CCEPresets.build_for_impl(
             impl,
             CCEPreset(
@@ -98,7 +187,7 @@ def linear_cross_entropy(
         )
 
         assert cce_linear_cross_entropy is not None
-        return cce_linear_cross_entropy(
+        loss, lse = cce_linear_cross_entropy(
             e,
             c,
             targets,
@@ -109,9 +198,10 @@ def linear_cross_entropy(
             shift,
             **cce_opts,
             vocab_parallel_options=vocab_parallel_options,
+            return_lse=return_lse,
         )
     elif impl == "torch_compile":
-        return torch_compile_linear_cross_entropy(
+        loss, lse = torch_compile_linear_cross_entropy(
             e,
             c,
             targets,
@@ -121,9 +211,16 @@ def linear_cross_entropy(
             reduction,
             shift,
             vocab_parallel_options=vocab_parallel_options,
+            return_lse=return_lse,
         )
     else:
         raise NotImplementedError(f"{impl} is not implemented.")
+
+    if return_lse:
+        assert lse is not None
+        return loss, lse
+    else:
+        return loss
 
 
 class LinearCrossEntropy(nn.Module):
@@ -139,6 +236,7 @@ class LinearCrossEntropy(nn.Module):
         filter_e_grad: bool = True,
         filter_c_grad: bool = True,
         impl: str | LinearCrossEntropyImpl = LCE_IMPL_DEFAULT,
+        return_lse: bool = False,
     ):
         super().__init__()
         self.ignore_index = ignore_index
@@ -154,6 +252,7 @@ class LinearCrossEntropy(nn.Module):
         self.filter_c_grad = filter_c_grad
 
         self.impl = impl
+        self.return_lse = return_lse
 
     def forward(
         self,
@@ -161,7 +260,7 @@ class LinearCrossEntropy(nn.Module):
         c: torch.Tensor,
         targets: torch.Tensor,
         bias: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         return linear_cross_entropy(
             e,
             c,
@@ -177,4 +276,5 @@ class LinearCrossEntropy(nn.Module):
             filter_e_grad=self.filter_e_grad,
             filter_c_grad=self.filter_c_grad,
             impl=self.impl,
+            return_lse=self.return_lse,
         )

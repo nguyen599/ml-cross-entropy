@@ -13,6 +13,7 @@ from cut_cross_entropy.tl_utils import (
     tl_softcapping,
     tl_softcapping_grad,
 )
+from cut_cross_entropy.utils import TensorInfo
 from cut_cross_entropy.vocab_parallel.utils import vp_reduce_e_grad
 
 
@@ -32,7 +33,7 @@ def _mm_backward(
     BLOCK_D: tl.constexpr,
     EVEN_D: tl.constexpr,
     USE_KAHAN: tl.constexpr,
-    DOT_PRECISION: tl.constexpr
+    DOT_PRECISION: tl.constexpr,
 ):
     d_inds = tl.arange(0, BLOCK_D)[None, :].to(tl.int64)
 
@@ -82,6 +83,7 @@ def _cce_backward_kernel(
     LSE,
     dOut,
     grad_scale,
+    dLSE,
     Valids,
     VocabOrdering,
     softcap,
@@ -125,6 +127,7 @@ def _cce_backward_kernel(
     FILTER_C_GRAD: tl.constexpr,
     HAS_TARGETS: tl.constexpr,
     HAS_SOFTCAP: tl.constexpr,
+    HAS_DLSE: tl.constexpr,
     HAS_SHIFT: tl.constexpr,
     KAHAN_E: tl.constexpr,
     KAHAN_C: tl.constexpr,
@@ -176,9 +179,9 @@ def _cce_backward_kernel(
 
     tl.debug_barrier()
 
+    accum = accum.cast(E.dtype.element_ty, fp_downcast_rounding="rtne")
     if HAS_BIAS:
         bias = tl.load(Bias + offs_v * stride_biasv, mask=offs_v < V, other=0.0)
-        bias = bias.to(dtype=accum.dtype)
         accum += bias[None, :]
 
     if HAS_SOFTCAP:
@@ -190,6 +193,7 @@ def _cce_backward_kernel(
     else:
         lse = tl.load(LSE + offs_b, mask=offs_b < B, other=float("inf"))
 
+    accum = accum.cast(tl.float32)
     d_accum = tl.exp(accum - lse[:, None])
     d_accum = tl.where(offs_v[None, :] < V, d_accum, 0.0)
 
@@ -212,9 +216,6 @@ def _cce_backward_kernel(
     elif (FILTER_E_GRAD and COMPUTE_DE) or (FILTER_C_GRAD and COMPUTE_DC):
         should_skip = _block_is_filtered(tl.abs(d_accum), filter_eps)
 
-    if HAS_SOFTCAP:
-        d_accum = tl_softcapping_grad(d_accum, accum, softcap)
-
     if ITEM_DO:
         d_out = tl.load(dOut)
     else:
@@ -227,12 +228,33 @@ def _cce_backward_kernel(
 
     d_out = grad_scale * d_out
 
-    d_accum = d_accum * d_out
+    if HAS_DLSE:
+        if HAS_SHIFT:
+            d_lse_offs_b = offs_b + shift
+        else:
+            d_lse_offs_b = offs_b
+
+        d_lse = tl.load(dLSE + d_lse_offs_b, mask=d_lse_offs_b < BMax, other=0.0)[:, None]
+
+        d_accum *= d_out + d_lse
+
+        if HAS_TARGETS:
+            # We have d_accum = d_mm - is_target
+            # We then want to get d_accum = d_mm * (d_out + d_lse) - is_target * d_out
+            # If we do d_accum * (d_out + d_lse), we get d_mm * (d_out + d_lse) - is_target * (d_out + d_lse)
+            # So we need to do d_accum += is_target * d_lse
+
+            d_accum += tl.where(is_target, d_lse, 0.0)
+    else:
+        d_accum = d_accum * d_out
+
+    if HAS_SOFTCAP:
+        d_accum = tl_softcapping_grad(d_accum, accum, softcap)
 
     if COMPUTE_DBIAS:
         tl.atomic_add(dBias + offs_v * stride_biasv, tl.sum(d_accum, 0), mask=offs_v < V)
 
-    d_accum = d_accum.to(e_ptrs.dtype.element_ty)
+    d_accum = d_accum.cast(E.dtype.element_ty, fp_downcast_rounding="rtne")
 
     if COMPUTE_DE:
         if FILTER_E_GRAD:
@@ -305,6 +327,7 @@ _cce_backward_kernel = triton.heuristics(  # type: ignore
         "HAS_VOCAB_ORDERING": lambda args: args["VocabOrdering"] is not None,
         "HAS_TARGETS": lambda args: args["Targets"] is not None,
         "HAS_SOFTCAP": lambda args: args["softcap"] is not None,
+        "HAS_DLSE": lambda args: args["dLSE"] is not None,
         "HAS_SHIFT": lambda args: args["shift"] != 0,
         "ITEM_DO": lambda args: args["dOut"].numel() == 1,
         "GROUP_B": lambda args: 8,
@@ -323,9 +346,13 @@ _cce_backward_kernel = cce_backward_autotune()(_cce_backward_kernel)  # type: ig
 
 def cce_backward_kernel(
     do: torch.Tensor,
+    dlse: torch.Tensor | None,
     e: torch.Tensor,
+    e_info: TensorInfo,
     c: torch.Tensor,
+    c_info: TensorInfo,
     bias: torch.Tensor | None,
+    bias_info: TensorInfo | None,
     lse: torch.Tensor,
     valids: torch.Tensor | None,
     softcap: float | None,
@@ -344,31 +371,35 @@ def cce_backward_kernel(
     assert do.numel() in (e.size(0), 1)
     assert c.size(1) == e.size(1)
     assert lse.size(0) == e.size(0) or (valids is not None and lse.size(0) == valids.size(0))
-    assert e.dtype in (
-        torch.float16,
-        torch.bfloat16,
-    ), "Backwards requires embeddings to be bf16 or fp16"
-    assert c.dtype in (
-        torch.float16,
-        torch.bfloat16,
-    ), "Backwards requires classifier to be bf16 or fp16"
+
+    if not is_triton_greater_or_equal_3_2_0():
+        assert e.dtype in (
+            torch.float16,
+            torch.bfloat16,
+        ), "Backwards for triton<3.2 requires embeddings to be bf16 or fp16"
+        assert c.dtype in (
+            torch.float16,
+            torch.bfloat16,
+        ), "Backwards for triton<3.2 requires classifier to be bf16 or fp16"
+        can_use_fp32_accum = False
+    else:
+        can_use_fp32_accum = True
 
     do = do.contiguous()
     lse = lse.contiguous()
 
-    can_use_fp32_accum = is_triton_greater_or_equal_3_2_0()
-
     de_dtype = torch.float32 if (accum_e_fp32 and can_use_fp32_accum) else None
-    de = torch.zeros_like(e, dtype=de_dtype) if e.requires_grad else None
+    de = torch.zeros_like(e, dtype=de_dtype) if e_info.requires_grad else None
 
     dc_dtype = torch.float32 if (accum_c_fp32 and can_use_fp32_accum) else None
-    dc = torch.zeros_like(c, dtype=dc_dtype) if c.requires_grad else None
+    dc = torch.zeros_like(c, dtype=dc_dtype) if c_info.requires_grad else None
 
     accum_e_fp32 = accum_e_fp32 and de is not None
     accum_c_fp32 = accum_c_fp32 and dc is not None
 
     if bias is not None:
-        dbias = torch.zeros_like(bias, dtype=torch.float32) if bias.requires_grad else None
+        assert bias_info is not None
+        dbias = torch.zeros_like(bias, dtype=torch.float32) if bias_info.requires_grad else None
     else:
         dbias = None
 
@@ -403,6 +434,11 @@ def cce_backward_kernel(
         B = valids.size(0)
     else:
         B = e.size(0)
+
+    if dlse is not None:
+        dlse = dlse.contiguous()
+        if do.numel() > 1:
+            assert dlse.size() == do.size()
 
     if do.numel() > 1:
         do = do.contiguous()
@@ -439,6 +475,7 @@ def cce_backward_kernel(
         lse,
         do,
         grad_scale,
+        dlse,
         valids,
         vocab_ordering,
         softcap,
@@ -473,13 +510,13 @@ def cce_backward_kernel(
         de = vp_reduce_e_grad(de, pg)
 
     if dbias is not None:
-        assert bias is not None
-        dbias = dbias.to(dtype=bias.dtype)
+        assert bias_info is not None
+        dbias = dbias.to(dtype=bias_info.dtype)
 
     if dc is not None:
-        dc = dc.to(dtype=c.dtype)
+        dc = dc.to(dtype=c_info.dtype)
 
     if de is not None:
-        de = de.to(dtype=e.dtype)
+        de = de.to(dtype=e_info.dtype)
 
     return de, dc, dbias
