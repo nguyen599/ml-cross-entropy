@@ -1,15 +1,61 @@
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
+import importlib
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 import torch
 import transformers
-from torch.distributed.tensor import DTensor, Shard
+
+try:
+    from torch.distributed.tensor import DTensor
+    from torch.distributed.tensor.placement_types import Shard
+except ImportError:
+    try:
+        from torch.distributed._tensor import DTensor, Shard
+    except ImportError:
+        DTensor = None
+        Shard = None
+
+from contextlib import contextmanager
+
+import torch.nn as nn
 
 from cut_cross_entropy import VocabParallelOptions, linear_cross_entropy
 from cut_cross_entropy.cce_utils import CCEPreset
 
 TransformersModelT = TypeVar("TransformersModelT", bound=transformers.PreTrainedModel)
+
+# Error message for unimplemented remote model loading
+REMOTE_MODEL_NOT_IMPLEMENTED_ERROR = (
+    "Remote model loading patching not yet implemented for {model_type}. "
+    "Please create an issue at https://github.com/axolotl-ai-cloud/axolotl/issues "
+    "to request support for this model."
+)
+
+
+@contextmanager
+def init_empty_weights():
+    """
+    A context manager under which models are initialized with all parameters on the meta device,
+    therefore creating an empty model. Useful when just initializing the model would blow the available RAM.
+
+    This is a minimal implementation adapted from accelerate.init_empty_weights to avoid the accelerate dependency.
+    """
+    old_register_parameter = nn.Module.register_parameter
+
+    def register_empty_parameter(module, name, param):
+        old_register_parameter(module, name, param)
+        if param is not None:
+            param_cls = type(module._parameters[name])
+            kwargs = module._parameters[name].__dict__.copy()
+            kwargs["requires_grad"] = param.requires_grad
+            module._parameters[name] = param_cls(module._parameters[name].to("meta"), **kwargs)
+
+    try:
+        nn.Module.register_parameter = register_empty_parameter
+        yield
+    finally:
+        nn.Module.register_parameter = old_register_parameter
 
 
 class CCEKwargs(CCEPreset):
@@ -107,3 +153,37 @@ def apply_lce(
         loss = loss / num_items_in_batch
 
     return loss
+
+
+def patch_remote_model_class(
+    remote_model_id: str,
+    class_name: str,
+    patch_fn: Callable,
+) -> None:
+    """
+    Load remote model code and patch a specific class method.
+
+    Args:
+        remote_model_id: The HuggingFace model ID to load remote code from
+        class_name: Name of the class to patch (e.g., "KimiLinearForCausalLM")
+        patch_fn: Function to patch the class method (e.g., forward function)
+    """
+    from transformers.dynamic_module_utils import get_class_in_module
+
+    # Load the remote model configuration to trigger remote code download
+    model_config = transformers.AutoConfig.from_pretrained(remote_model_id, trust_remote_code=True)
+
+    # Get the auto class to download modeling code without loading weights
+    with init_empty_weights():
+        transformers.AutoModelForCausalLM.from_config(model_config, trust_remote_code=True)
+
+    # Derive the module name from the config
+    parts = model_config.__class__.__module__.split(".")
+    parts[-1] = parts[-1].replace("configuration_", "modeling_", 1)
+    module_name = ".".join(parts)
+
+    # Use get_class_in_module. This can be patched downstream (for ex: in Axolotl).
+    model_class = get_class_in_module(class_name, module_name)
+
+    # Patch the forward method
+    setattr(model_class, "forward", patch_fn)

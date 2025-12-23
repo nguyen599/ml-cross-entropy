@@ -65,6 +65,11 @@ except ImportError:
     patch_lfm2_moe = None
 
 try:
+    from .kimi_linear import patch_kimi_linear
+except ImportError:
+    patch_kimi_linear = None
+    
+try:
     from .olmo3 import patch_olmo, patch_olmo2, patch_olmo3
 except ImportError:
     patch_olmo = None
@@ -97,6 +102,7 @@ PATCH_FNS = {
     "granitemoehybrid": patch_granitemoehybrid,
     "hunyuan_v1_dense": patch_hunyuan_v1_dense,
     "hunyuan_v1_moe": patch_hunyuan_v1_moe,
+    "kimi_linear": patch_kimi_linear,
     "lfm2": patch_lfm2,
     "lfm2_moe": patch_lfm2_moe,
     "lfm2_vl": patch_lfm2_vl,
@@ -169,6 +175,7 @@ def cce_patch(
     filter_e_grad: bool = True,
     filter_c_grad: bool = True,
     train_only: bool = False,
+    remote_model_id: str | None = None
 ) -> TransformersModelT | None:
     if isinstance(impl, LinearCrossEntropyImpl):
         impl = impl.name.lower()
@@ -206,6 +213,6 @@ def cce_patch(
                 f"Please ensure your transformers version support {model_type}"
             )
 
-        return PATCH_FNS[model_type](model_type_or_model, patch_options)
+        return PATCH_FNS[model_type](model_type_or_model, patch_options, remote_model_id)
     else:
         raise RuntimeError(f"Unknown model type {model_type}")
