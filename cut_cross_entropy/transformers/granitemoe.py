@@ -28,6 +28,7 @@ from transformers.models.granitemoe.modeling_granitemoe import (
 )
 
 from cut_cross_entropy.transformers.utils import (
+    REMOTE_MODEL_NOT_IMPLEMENTED_ERROR,
     PatchOptions,
     TransformersModelT,
     apply_lce,
@@ -150,7 +151,10 @@ def cce_forward(
 def patch_granitemoe(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
+    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
+    if remote_model_id is not None:
+        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="granitemoe"))
     global _PATCH_OPTS
 
     from transformers.models.granitemoe import modeling_granitemoe
@@ -172,42 +176,48 @@ def patch_granitemoe(
 def patch_granitemoeshared(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
+    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
+    if remote_model_id is not None:
+        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="granitemoeshared"))
     global _PATCH_OPTS
 
-    from transformers.models.granitemoe import modeling_granitemoe
+    from transformers.models.granitemoeshared import modeling_granitemoeshared
 
     _PATCH_OPTS = patch_options
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_granitemoe.GraniteMoeSharedForCausalLM), (
+        assert isinstance(maybe_model, modeling_granitemoeshared.GraniteMoeSharedForCausalLM), (
             f"Expected a GraniteMoeSharedForCausalLM model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
 
         return maybe_model
 
-    modeling_granitemoe.GraniteMoeSharedForCausalLM.forward = cce_forward
+    modeling_granitemoeshared.GraniteMoeSharedForCausalLM.forward = cce_forward
     return None
 
 
 def patch_granitemoehybrid(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
+    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
+    if remote_model_id is not None:
+        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="granitemoehybrid"))
     global _PATCH_OPTS
 
-    from transformers.models.granitemoe import modeling_granitemoe
+    from transformers.models.granitemoehybrid import modeling_granitemoehybrid
 
     _PATCH_OPTS = patch_options
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_granitemoe.GraniteMoeHybridForCausalLM), (
+        assert isinstance(maybe_model, modeling_granitemoehybrid.GraniteMoeHybridForCausalLM), (
             f"Expected a GraniteMoeHybridForCausalLM model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
 
         return maybe_model
 
-    modeling_granitemoe.GraniteMoeHybridForCausalLM.forward = cce_forward
+    modeling_granitemoehybrid.GraniteMoeHybridForCausalLM.forward = cce_forward
     return None

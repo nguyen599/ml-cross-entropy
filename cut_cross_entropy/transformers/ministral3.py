@@ -1,4 +1,4 @@
-"""Arcee patch. Arcee inherits from Llama. Adapted from transformers 4.56.2."""
+"""Ministral 1/3 CCE patch. Both inherits Llama. Adapted from transformers PR 42498."""
 
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 
@@ -21,20 +21,15 @@ from types import MethodType
 import transformers
 
 from cut_cross_entropy.transformers.utils import (
-    REMOTE_MODEL_NOT_IMPLEMENTED_ERROR,
     PatchOptions,
     TransformersModelT,
 )
 
 
-def patch_arcee(
+def patch_ministral(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
-    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
-    if remote_model_id is not None:
-        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="arcee"))
-    
     # Set the _PATCH_OPTS in the llama patch file
     from . import llama as llama_patch
 
@@ -42,14 +37,38 @@ def patch_arcee(
 
     cce_forward = llama_patch.cce_forward
 
-    from transformers.models.arcee import modeling_arcee
+    from transformers.models.ministral import modeling_ministral
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_arcee.ArceeForCausalLM), (
-            f"Expected a ArceeForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_ministral.MinistralForCausalLM), (
+            f"Expected a MinistralForCausalLM model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 
-    modeling_arcee.ArceeForCausalLM.forward = cce_forward
+    modeling_ministral.MinistralForCausalLM.forward = cce_forward
+    return None
+
+
+def patch_ministral3(
+    maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
+    patch_options: PatchOptions,
+) -> TransformersModelT | None:
+    # Set the _PATCH_OPTS in the llama patch file
+    from . import llama as llama_patch
+
+    llama_patch._PATCH_OPTS = patch_options
+
+    cce_forward = llama_patch.cce_forward
+
+    from transformers.models.ministral3 import modeling_ministral3
+
+    if isinstance(maybe_model, transformers.PreTrainedModel):
+        assert isinstance(maybe_model, modeling_ministral3.Ministral3ForCausalLM), (
+            f"Expected a Ministral3ForCausalLM model. Got {type(maybe_model)}."
+        )
+        maybe_model.forward = MethodType(cce_forward, maybe_model)
+        return maybe_model
+
+    modeling_ministral3.Ministral3ForCausalLM.forward = cce_forward
     return None

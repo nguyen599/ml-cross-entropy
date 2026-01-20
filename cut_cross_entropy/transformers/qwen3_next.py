@@ -21,6 +21,7 @@ from types import MethodType
 import transformers
 
 from cut_cross_entropy.transformers.utils import (
+    REMOTE_MODEL_NOT_IMPLEMENTED_ERROR,
     PatchOptions,
     TransformersModelT,
 )
@@ -29,7 +30,11 @@ from cut_cross_entropy.transformers.utils import (
 def patch_qwen3_next(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
+    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
+    if remote_model_id is not None:
+        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="qwen3_next"))
+    
     # Set the _PATCH_OPTS in the mixtral patch file
     from . import mixtral as mixtral_patch
 
@@ -40,9 +45,9 @@ def patch_qwen3_next(
     from transformers.models.qwen3_next import modeling_qwen3_next
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(
-            maybe_model, modeling_qwen3_next.Qwen3NextForCausalLM
-        ), f"Expected a Qwen3NextForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_qwen3_next.Qwen3NextForCausalLM), (
+            f"Expected a Qwen3NextForCausalLM model. Got {type(maybe_model)}."
+        )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 

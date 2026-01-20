@@ -1,4 +1,4 @@
-"""GLM 4 patch. GLM family inherits from Llama. Adapted from transformers 4.56.2."""
+"""OLMO patch. It inherits from Llama. Adapted from transformers 4.57.1."""
 
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 
@@ -21,19 +21,15 @@ from types import MethodType
 import transformers
 
 from cut_cross_entropy.transformers.utils import (
-    REMOTE_MODEL_NOT_IMPLEMENTED_ERROR,
     PatchOptions,
     TransformersModelT,
 )
 
 
-def patch_glm(
+def patch_olmo(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
-    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
-    if remote_model_id is not None:
-        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="glm"))
     # Set the _PATCH_OPTS in the llama patch file
     from . import llama as llama_patch
 
@@ -41,26 +37,23 @@ def patch_glm(
 
     cce_forward = llama_patch.cce_forward
 
-    from transformers.models.glm import modeling_glm
+    from transformers.models.olmo import modeling_olmo
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_glm.GlmForCausalLM), (
-            f"Expected a GlmForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_olmo.OlmoForCausalLM), (
+            f"Expected a OlmoForCausalLM model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 
-    modeling_glm.GlmForCausalLM.forward = cce_forward
+    modeling_olmo.OlmoForCausalLM.forward = cce_forward
     return None
 
 
-def patch_glm4(
+def patch_olmo2(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
-    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
-    if remote_model_id is not None:
-        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="glm4"))
     # Set the _PATCH_OPTS in the llama patch file
     from . import llama as llama_patch
 
@@ -68,26 +61,23 @@ def patch_glm4(
 
     cce_forward = llama_patch.cce_forward
 
-    from transformers.models.glm4 import modeling_glm4
+    from transformers.models.olmo2 import modeling_olmo2
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_glm4.Glm4ForCausalLM), (
-            f"Expected a Glm4ForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_olmo2.Olmo2ForCausalLM), (
+            f"Expected a Olmo2ForCausalLM model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 
-    modeling_glm4.Glm4ForCausalLM.forward = cce_forward
+    modeling_olmo2.Olmo2ForCausalLM.forward = cce_forward
     return None
 
 
-def patch_glm4_moe(
+def patch_olmo3(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
-    remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
-    if remote_model_id is not None:
-        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="glm4_moe"))
     # Set the _PATCH_OPTS in the llama patch file
     from . import llama as llama_patch
 
@@ -95,14 +85,14 @@ def patch_glm4_moe(
 
     cce_forward = llama_patch.cce_forward
 
-    from transformers.models.glm4_moe import modeling_glm4_moe
+    from transformers.models.olmo3 import modeling_olmo3
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_glm4_moe.Glm4MoeForCausalLM), (
-            f"Expected a Glm4MoeForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_olmo3.Olmo3ForCausalLM), (
+            f"Expected a Olmo3ForCausalLM model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 
-    modeling_glm4_moe.Glm4MoeForCausalLM.forward = cce_forward
+    modeling_olmo3.Olmo3ForCausalLM.forward = cce_forward
     return None

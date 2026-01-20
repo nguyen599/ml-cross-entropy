@@ -1,4 +1,4 @@
-"""Arcee patch. Arcee inherits from Llama. Adapted from transformers 4.56.2."""
+"""InternVL CCE patch. InternVL inherits Llava. Adapted from transformers 4.57.0."""
 
 # Copyright (C) 2024 Apple Inc. All Rights Reserved.
 
@@ -27,29 +27,29 @@ from cut_cross_entropy.transformers.utils import (
 )
 
 
-def patch_arcee(
+def patch_internvl(
     maybe_model: TransformersModelT | str | transformers.PretrainedConfig,
     patch_options: PatchOptions,
     remote_model_id: str | None = None,
 ) -> TransformersModelT | None:
     if remote_model_id is not None:
-        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="arcee"))
-    
-    # Set the _PATCH_OPTS in the llama patch file
-    from . import llama as llama_patch
+        raise NotImplementedError(REMOTE_MODEL_NOT_IMPLEMENTED_ERROR.format(model_type="internvl"))
 
-    llama_patch._PATCH_OPTS = patch_options
+    # Set the _PATCH_OPTS in the llava patch file
+    from . import llava as llava_patch
 
-    cce_forward = llama_patch.cce_forward
+    llava_patch._PATCH_OPTS = patch_options
 
-    from transformers.models.arcee import modeling_arcee
+    cce_forward = llava_patch.cce_forward
+
+    from transformers.models.internvl import modeling_internvl
 
     if isinstance(maybe_model, transformers.PreTrainedModel):
-        assert isinstance(maybe_model, modeling_arcee.ArceeForCausalLM), (
-            f"Expected a ArceeForCausalLM model. Got {type(maybe_model)}."
+        assert isinstance(maybe_model, modeling_internvl.InternVLForConditionalGeneration), (
+            f"Expected a InternVLForConditionalGeneration model. Got {type(maybe_model)}."
         )
         maybe_model.forward = MethodType(cce_forward, maybe_model)
         return maybe_model
 
-    modeling_arcee.ArceeForCausalLM.forward = cce_forward
+    modeling_internvl.InternVLForConditionalGeneration.forward = cce_forward
     return None

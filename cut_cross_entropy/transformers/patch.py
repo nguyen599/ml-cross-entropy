@@ -18,10 +18,12 @@ from .gpt_oss import patch_gpt_oss
 from .granite import patch_granite
 from .granitemoe import patch_granitemoe, patch_granitemoehybrid, patch_granitemoeshared
 from .hunyuan_v1 import patch_hunyuan_v1_dense, patch_hunyuan_v1_moe
+from .internvl import patch_internvl
 from .lfm2 import patch_lfm2
 from .llama import patch_llama
 from .llama4 import patch_llama4, patch_llama4_text
 from .llava import patch_llava
+from .ministral3 import patch_ministral, patch_ministral3
 from .mistral import patch_mistral
 from .mistral3 import patch_mistral3
 from .mixtral import patch_mixtral
@@ -63,6 +65,18 @@ try:
 except ImportError:
     patch_lfm2_moe = None
 
+try:
+    from .kimi_linear import patch_kimi_linear
+except ImportError:
+    patch_kimi_linear = None
+    
+try:
+    from .olmo3 import patch_olmo, patch_olmo2, patch_olmo3
+except ImportError:
+    patch_olmo = None
+    patch_olmo2 = None
+    patch_olmo3 = None
+
 AXOLOTL_CCE_FORK = 1
 
 PATCH_FNS = {
@@ -89,6 +103,8 @@ PATCH_FNS = {
     "granitemoehybrid": patch_granitemoehybrid,
     "hunyuan_v1_dense": patch_hunyuan_v1_dense,
     "hunyuan_v1_moe": patch_hunyuan_v1_moe,
+    "internvl": patch_internvl,
+    "kimi_linear": patch_kimi_linear,
     "lfm2": patch_lfm2,
     "lfm2_moe": patch_lfm2_moe,
     "lfm2_vl": patch_lfm2_vl,
@@ -96,10 +112,15 @@ PATCH_FNS = {
     "llama4": patch_llama4,
     "llava": patch_llava,
     "llama4_text": patch_llama4_text,
+    "ministral": patch_ministral,
+    "ministral3": patch_ministral3,
     "mistral": patch_mistral,
     "mistral3": patch_mistral3,
     "mixtral": patch_mixtral,
     "mllama": patch_mllama,
+    "olmo": patch_olmo,
+    "olmo2": patch_olmo2,
+    "olmo3": patch_olmo3,
     "phi": patch_phi,
     "phi3": patch_phi3,
     "phi4_multimodal": patch_phi4_multimodal,
@@ -156,6 +177,7 @@ def cce_patch(
     filter_e_grad: bool = True,
     filter_c_grad: bool = True,
     train_only: bool = False,
+    remote_model_id: str | None = None
 ) -> TransformersModelT | None:
     if isinstance(impl, LinearCrossEntropyImpl):
         impl = impl.name.lower()
@@ -193,6 +215,6 @@ def cce_patch(
                 f"Please ensure your transformers version support {model_type}"
             )
 
-        return PATCH_FNS[model_type](model_type_or_model, patch_options)
+        return PATCH_FNS[model_type](model_type_or_model, patch_options, remote_model_id)
     else:
         raise RuntimeError(f"Unknown model type {model_type}")
